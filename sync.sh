@@ -51,8 +51,18 @@ rm -rf harness
 
 echo "$SHA" > UPSTREAM-SHA.txt
 
+# A moved upstream tip with identical pstack content changes only the SHA record;
+# commit that here so the workflow sees a clean tree and opens no PR for it.
 if git diff --quiet && [ -z "$(git status --porcelain --untracked-files=normal)" ]; then
   echo "==> already in sync with $SHA; nothing to commit"
+elif git diff --quiet -- . ':!UPSTREAM-SHA.txt' && \
+     [ -z "$(git status --porcelain --untracked-files=normal -- . ':!UPSTREAM-SHA.txt')" ]; then
+  git add UPSTREAM-SHA.txt
+  if git commit -q -m "Record upstream cursor/plugins/pstack @ ${SHA:0:7} (pstack unchanged)" 2>/dev/null; then
+    echo "==> upstream tip moved but pstack is unchanged; SHA recorded. Push when you like."
+  else
+    echo "==> upstream tip moved but pstack is unchanged; SHA recorded in UPSTREAM-SHA.txt (commit it yourself)."
+  fi
 else
   echo "==> changes ready. Commit with:"
   echo "    git add -A && git commit -m 'Sync upstream cursor/plugins/pstack @ ${SHA:0:7}'"
