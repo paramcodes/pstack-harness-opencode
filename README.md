@@ -1,87 +1,80 @@
-# pstack OpenCode adapter
+# pstack-harness-opencode
 
-An `opencode.md` harness adapter for [pstack](https://github.com/cursor/plugins/tree/main/pstack)
-(0.15.32), written for cursor/plugins' official harness mechanism — the same one that generates the
-Claude Code tree from `docs/harness/claude-code.md`. Built 2026-10-25 against the OpenCode v2 docs
-(tools, agents, skills, commands pages).
+An OpenCode adapter for [pstack](https://github.com/cursor/plugins/tree/main/pstack), built on
+cursor/plugins' official harness mechanism — the same one that generates the Claude Code tree from
+`pstack/docs/harness/claude-code.md`. This repo tracks upstream so the adapter stays current.
 
-## What's here
+## Layout
 
-| File | What it is |
+| Path | What it is |
 |---|---|
-| `opencode.md` | The adapter. Upstream home: `pstack/docs/harness/opencode.md`. Covers every Cursor term the generator checks (21 terms + skill-routing), so the coverage gate passes. |
-| `generate-pstack-harness-trees.mjs` | Patched generator. Parameterized over a `TREES` list so it emits both `claude-code/` and `opencode/`. Verified: the regenerated `claude-code/` tree is byte-identical to upstream's committed one. |
-| `tree/` | The generated `harness/pstack/opencode/` tree: 58 skills, agents, guide, adapter, README, LICENSE. Each Cursor-flavored skill has one injected line pointing at the adapter. |
+| `pstack/` | Upstream `pstack/` folder, synced by `sync.sh` (mirror-style). |
+| `pstack/docs/harness/opencode.md` | **Ours.** The adapter: maps every Cursor name pstack skills use to OpenCode 2.x. The generator's coverage gate fails the sync if a new Cursor term has no row here. |
+| `scripts/generate-pstack-harness-trees.mjs` | **Ours.** Upstream's generator, parameterized over a `TREES` list so it emits `claude-code/` and `opencode/`. Verified: the claude-code tree regenerates byte-identical to upstream's. |
+| `tree/` | The generated `harness/pstack/opencode/` tree — what `install.sh` installs. Regenerated on every sync. |
+| `sync.sh` | Manual upstream sync. See below. |
+| `.github/workflows/sync-upstream.yml` | Optional weekly automation: syncs and opens a PR. Nothing auto-merges. |
+| `install.sh` | Fresh-system installer. |
+| `UPSTREAM-SHA.txt` | The cursor/plugins commit last synced. |
 
-## Fresh-system install (tested)
-
-```bash
-./install.sh            # or: PSTACK_DIR=~/somewhere ./install.sh
-```
-
-One script, verified end to end against a scratch HOME:
-
-1. Copies `tree/` intact to `~/pstack` (default; override with `PSTACK_DIR`), so the skills'
-   `../../docs/harness/opencode.md` links resolve on disk.
-2. Adds `"skills": ["<PSTACK_DIR>/skills"]` to `~/.config/opencode/opencode.json` — opencode's
-   documented extra-source mechanism. If the file is JSONC or node is absent, it prints the line
-   to add instead of editing.
-3. Installs `poteto-agent` and `comment-sicko` into `~/.config/opencode/agents/` with
-   `mode: subagent` injected into their frontmatter.
-4. Writes `/command` wrappers for the 57 of 58 skills that ship
-   `disable-model-invocation: true` (everything except `setup-pstack` — upstream treats skills as
-   user-invoked commands, and opencode v2 honors that field, so without wrappers they are only
-   reachable via `@skill-id`).
-
-Then: restart opencode, ask it to *"Read ~/pstack/skills/setup-pstack/SKILL.md and follow it"* to
-write `~/.agents/pstack-models.md`, and use `/arena`, `/poteto-mode`, etc.
-
-Update later: replace `~/pstack` + re-run the agent/wrapper steps (re-running the script does all of it).
-Uninstall: delete `~/pstack`, `~/.config/opencode/agents/{poteto-agent,comment-sicko}.md`,
-`~/.config/opencode/commands/*.md` from this pack, and the `skills` entry in `opencode.json`.
-
-## Option A — keep tracking upstream (recommended for contributing)
-
-1. Clone `cursor/plugins`, copy `opencode.md` to `pstack/docs/harness/`, replace
-   `scripts/generate-pstack-harness-trees.mjs` with the one here.
-2. `node scripts/generate-pstack-harness-trees.mjs` — regenerates `harness/pstack/` (both trees).
-3. Commit; ideally PR it upstream (`harness/pstack/opencode/` + the two files). After that, every
-   upstream sync is one merge + one generator run.
-
-## Option B — install the generated tree as-is
+## Install on a fresh system
 
 ```bash
-# skills (skill id = folder name)
-cp -r tree/skills/* ~/.config/opencode/skills/
-
-# agents — add `mode: subagent` to each file's frontmatter (they ship Cursor frontmatter,
-# and OpenCode defaults custom agents to mode: primary)
-cp tree/agents/*.md ~/.config/opencode/agents/
-# then edit both files: add a line `mode: subagent` under `description:`
+git clone https://github.com/paramcodes/pstack-harness-opencode.git
+cd pstack-harness-opencode && ./install.sh
 ```
 
-Then run `/setup-pstack`-style setup once: create `~/.agents/pstack-models.md` with one
-`role: model` line per role (real slugs from `opencode models`; `inherit-parent` always valid).
-OpenCode does not load that file itself — the skills read it when they pick a model.
+The installer (tested end to end): copies `tree/` intact to `~/pstack` so the skills'
+`../../docs/harness/opencode.md` links resolve; adds `"skills": ["~/pstack/skills"]` to
+`~/.config/opencode/opencode.json`; installs `poteto-agent` and `comment-sicko` into
+`~/.config/opencode/agents/` with `mode: subagent`; writes `/command` wrappers for the 57 of 58
+skills that ship `disable-model-invocation: true` (everything except `setup-pstack` — without
+wrappers those are only reachable via `@skill-id`).
 
-Optional slash commands (OpenCode has no skills-as-commands): for each `/name` you want, add
-`~/.config/opencode/commands/name.md` whose body says "Read
-`~/.config/opencode/skills/name/SKILL.md` and follow it. $ARGUMENTS".
+Then restart opencode and ask it to *"Read ~/pstack/skills/setup-pstack/SKILL.md and follow it"* to
+write `~/.agents/pstack-models.md` (per-role models; `inherit-parent` is always valid). Until then
+skills use their defaults.
 
-## Notes and caveats
+Uninstall: delete `~/pstack`, the two agent files, this pack's command wrappers, and the `skills`
+entry in `opencode.json`.
 
-- **This machine already has two other pstack copies** that will collide on skill ids (OpenCode
-  scans `~/.config/opencode/skills` *and* the compat dir `~/.agents/skills`): the 0.15.10 local port
-  in `~/.config/opencode/skills/` and the backnotprop mirror in `~/.agents/skills/`. Installing this
-  tree overwrites the port's versions of the same folders. Decide which one source owns pstack
-  skills and remove the others, or the last-registered source wins per id.
-- Skills with `disable-model-invocation: true` in frontmatter (e.g. `arena`) are hidden from the
-  model's advertised list — OpenCode v2 honors that field — so they need a command wrapper or an
-  explicit `@skill-id` mention to be invoked.
-- The `subagent` tool takes no per-call model. Model choices live in agent frontmatter
-  (`~/.config/opencode/agents/<id>.md`) or default to the parent model; the adapter's Models table
-  says exactly this.
+## Tracking upstream
+
+`git remote add upstream` elsewhere is just a bookmark — nothing fetches by itself. This repo syncs
+mirror-style instead:
+
+```bash
+./sync.sh        # from the repo root
+```
+
+What it does: sparse-clones cursor/plugins at latest main, copies `pstack/` over ours (keeping our
+adapter file, which upstream does not have), regenerates the trees — **the generator's coverage
+gate runs here and fails loudly if upstream introduced a Cursor term the adapter has no row for** —
+refreshes `tree/`, writes `UPSTREAM-SHA.txt`, and suggests a commit message. `rsync --delete`
+means upstream deletions propagate; our only protected path is the adapter.
+
+Manual cadence is whenever you feel like it. For automatic:
+
+- `.github/workflows/sync-upstream.yml` runs the same sync every Monday 06:00 UTC (also
+  triggerable from the Actions tab) and opens a **pull request** when anything changed. It never
+  pushes to `main`; you review and merge. Delete the file for manual-only syncs.
+- The PR only appears if the sync produced changes and the coverage gate passed. If upstream adds
+  a Cursor term your adapter doesn't cover, the job fails instead of opening a PR — that's the
+  signal to add a row to `pstack/docs/harness/opencode.md` and re-run.
+
+## Contributing upstream
+
+The two "ours" files are the entire diff against cursor/plugins' mechanism. A PR to
+cursor/plugins would be: add `pstack/docs/harness/opencode.md`, apply the generator's `TREES`
+parameterization, commit the generated `harness/pstack/opencode/` (their CI requires the generated
+tree committed). After merge, `sync.sh` pulls your adapter from upstream and the local copy of
+these files becomes redundant.
+
+## Caveats
+
+- The `subagent` tool takes no per-call model; model choices live in agent frontmatter or the
+  parent model — the adapter's Models table says exactly this.
 - Cursor-only features (Automations/Benny, Bugbot, cloud agents) are skip-with-one-line, not
   ported, per the adapter's Cursor-only features section.
-- Upstream's own `check-pstack-docs.mjs` fails on pristine main today (a `/deslop` doc-link bug);
-  unrelated to this adapter. `validate-plugins.mjs` needs `npm i ajv` to run at all.
+- The adapter is advisory like Claude Code's: the model reads it once per session. Nothing
+  enforces it the way a hard-coded port would.

@@ -1,0 +1,47 @@
+name: sync upstream pstack
+
+# Optional automation for what sync.sh does by hand: once a week, refresh
+# pstack/ from cursor/plugins, regenerate the tree, and open a pull request
+# when anything changed. Nothing is pushed to master directly. Delete this file
+# if you prefer fully manual syncs.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Sync pstack from cursor/plugins
+        run: ./sync.sh
+      - name: Commit and open PR if changed
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "pstack-sync-bot"
+          git config user.email "actions@users.noreply.github.com"
+          SHA_SHORT="$(cut -c1-7 UPSTREAM-SHA.txt)"
+          git checkout -b "sync/pstack-${SHA_SHORT}"
+          if git diff --quiet && [ -z "$(git status --porcelain --untracked-files=normal)" ]; then
+            echo "Already in sync; no PR needed."
+            exit 0
+          fi
+          git add -A
+          git commit -m "Sync upstream cursor/plugins/pstack @ ${SHA_SHORT}"
+          git push origin "sync/pstack-${SHA_SHORT}"
+          gh pr create --title "Sync upstream cursor/plugins/pstack @ ${SHA_SHORT}" \
+            --body "Automated weekly sync. Run a quick eye over the diff; the generator's coverage gate already passed in CI. If the adapter needs new rows for new Cursor terms, sync.sh will have failed instead — this PR means it didn't." \
+            --base master --head "sync/pstack-${SHA_SHORT}"
+        # gh is preinstalled on ubuntu-latest runners and authenticates with the
+        # workflow's GITHUB_TOKEN when GH_TOKEN is set; Actions does that automatically.
